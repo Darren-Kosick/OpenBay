@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="OpenBay">
+  <meta name="theme-color" content="#f2f3f5">
+  <title>OpenBay</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <!-- three.js for the 3D lot. If it can't load, the app falls back to the 2D grid. -->
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+  </script>
+  <!-- Apply the saved appearance before first paint, so dark mode doesn't flash white. -->
+  <script>
+    (function () {
+      var pref = 'system';
+      try { pref = localStorage.getItem('openbay.appearance') || 'system'; } catch (e) {}
+      var dark = pref === 'dark' || (pref === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    })();
+  </script>
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <div id="app">
+    <p class="boot">Loading OpenBay…</p>
+  </div>
+  <div id="modal-root"></div>
+  <noscript><p class="boot">OpenBay needs JavaScript turned on.</p></noscript>
+</body>
+</html>
