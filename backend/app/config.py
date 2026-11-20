@@ -22,6 +22,8 @@ class Settings:
         self.frontend_dir = os.getenv("FRONTEND_DIR", "")
         # How often each replica marks finished reservations as completed.
         self.sweep_seconds = int(os.getenv("SWEEP_SECONDS", "30"))
+        # How long the pretend card processor takes to answer (see payments.py).
+        self.payment_delay_ms = int(os.getenv("PAYMENT_DELAY_MS", "800"))
 
 
 settings = Settings()

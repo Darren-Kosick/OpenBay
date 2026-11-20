@@ -1,5 +1,5 @@
-// The 3D lot, drawn with three.js.
-// Pale ground, soft grey "ghost" cars on occupied spots, rounded bays:
+// The 3D lot, drawn with three.js from the lot's real plan (outline, islands, nearby buildings, spots).
+// Soft grey "ghost" cars on occupied spots, rounded bays, a green glow under yours:
 // blue = available, red = reserved or held, green = yours, deeper blue with a floating P = selected.
 // One finger or mouse drag orbits, pinch or wheel zooms, a tap selects a spot.
 
@@ -7,14 +7,14 @@ import * as THREE from 'three';
 
 const PALETTES = {
   light: {
-    background: 0xeceef0, ground: 0xf6f7f8, lane: 0xdfe1e5,
+    background: 0xeceee9, ground: 0xf6f7f8, lane: 0xdfe1e5, island: 0xcfe5c4, building: 0xdcd8d0,
     ghost: 0xcdd0d5, ghostWheel: 0xa9adb3, driver: 0x1d1f23, driverWheel: 0x0c0d0f, shadow: 0.09,
     available: [0x3b82f6, 0xb5cdf8], reserved: [0xe5484d, 0xf5b9bb], held: [0xe5484d, 0xf5b9bb],
     occupied: [0xb4b7bc, 0xdcdee1], mine: [0x1f9d55, 0xb0e0c6], selected: [0x1d4ed8, 0x7fa8f5],
   },
   dark: {
-    background: 0x0f1012, ground: 0x17181b, lane: 0x2a2c31,
-    ghost: 0x50545b, ghostWheel: 0x2e3035, driver: 0xe8eaed, driverWheel: 0x9aa0a8, shadow: 0.35,
+    background: 0x22252f, ground: 0x2c3040, lane: 0x2a2c31, island: 0x2b4337, building: 0x4a4762,
+    ghost: 0x7a7f8c, ghostWheel: 0x2e3035, driver: 0xe8eaed, driverWheel: 0x9aa0a8, shadow: 0.35,
     available: [0x4c8dff, 0x1e3a6e], reserved: [0xff5a5f, 0x5e2024], held: [0xff5a5f, 0x5e2024],
     occupied: [0x3a3d43, 0x24262a], mine: [0x30c26e, 0x1c4a33], selected: [0x8fb4ff, 0x2f5fd0],
   },
@@ -59,18 +59,21 @@ function badgeTexture() {
 }
 
 /**
- * Builds the scene inside `el`. Returns { sync(spots, selectedId), setTheme(dark), dispose() }.
- * Throws if WebGL is unavailable; the caller falls back to the 2D grid.
+ * Builds the scene inside `el` from a lot plan (see lotplan.js): the real outline, grass islands,
+ * nearby buildings, and every spot where it really is. Returns { sync(spots, selectedId), setTheme(dark), dispose() }.
+ * Throws if WebGL is unavailable; the caller falls back to the 2D plan.
  */
-export function createLot3D(el, lot, spots, { dark = false, onPick = () => {} } = {}) {
-  const W = 2.7, D = 5.4, AISLE = 7;
-  const rowZ = (r) => r * D + Math.floor((r + 1) / 2) * AISLE;
-  const totalW = lot.cols * W, totalD = rowZ(lot.rows - 1) + D;
+export function createLot3D(el, plan, spots, { dark = false, onPick = () => {} } = {}) {
+  const W = plan.spotW, D = plan.spotD;
+  const N = plan.spots.length;
   let palette = dark ? PALETTES.dark : PALETTES.light;
+  const { extent } = plan;
+  const cx = (extent.minX + extent.maxX) / 2, cy = (extent.minY + extent.maxY) / 2;
+  const sizeX = extent.maxX - extent.minX, sizeY = extent.maxY - extent.minY;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(palette.background, 50, 200);
-  const camera = new THREE.PerspectiveCamera(40, 1, 0.5, 800);
+  scene.fog = new THREE.Fog(palette.background, 80, 400);
+  const camera = new THREE.PerspectiveCamera(40, 1, 0.5, 2000);
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
@@ -84,86 +87,76 @@ export function createLot3D(el, lot, spots, { dark = false, onPick = () => {} } 
   // three.js r155+ uses physical light units, so these are about π times the old values.
   const hemi = new THREE.HemisphereLight(0xffffff, 0xb4b9c1, 2.9);
   const sun = new THREE.DirectionalLight(0xffffff, 0.9);
-  sun.position.set(30, 60, 20);
+  sun.position.set(60, 120, 40);
   scene.add(hemi, sun);
 
-  const flat = (mesh) => { mesh.rotation.x = -Math.PI / 2; return mesh; };
-  const basic = (color) => new THREE.MeshBasicMaterial({ color });
-
-  const carGeo = carGeometry();
-  const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.22, 18);
-  const shadowGeo = roundRect(5.0, 2.5, 0.9);
-  const ghostMat = new THREE.MeshLambertMaterial();
-  const ghostWheel = new THREE.MeshLambertMaterial();
-  const driverMat = new THREE.MeshLambertMaterial();
-  const driverWheel = new THREE.MeshLambertMaterial();
-  const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: palette.shadow, depthWrite: false });
-
-  function makeCar(body, wheel) {
-    const car = new THREE.Group();
-    car.add(new THREE.Mesh(carGeo, body));
-    [[-1.35, 0.95], [-1.35, -0.95], [1.35, 0.95], [1.35, -0.95]].forEach(([x, z]) => {
-      const w = new THREE.Mesh(wheelGeo, wheel);
-      w.rotation.x = Math.PI / 2; w.position.set(x, 0.34, z);
-      car.add(w);
-    });
-    const shadow = flat(new THREE.Mesh(shadowGeo, shadowMat));
-    shadow.position.y = 0.045;
-    car.add(shadow);
-    return car;
-  }
-
+  // Local plan metres (x right, y up the plan) become world x and -z; everything centred on the lot.
   const root = new THREE.Group();
-  root.position.set(-totalW / 2, 0, -totalD / 2);
+  root.position.set(-cx, 0, cy);
   scene.add(root);
+  const shapeOf = (ring) => new THREE.Shape(ring.map(([x, y]) => new THREE.Vector2(x, y)));
+  const flatGeo = (geo, lift) => { geo.rotateX(-Math.PI / 2); geo.translate(0, lift, 0); return geo; };
 
-  const groundMat = basic(palette.ground);
-  const ground = flat(new THREE.Mesh(new THREE.PlaneGeometry(totalW + 600, totalD + 600), groundMat));
-  ground.position.set(totalW / 2, 0, totalD / 2);
+  const groundMat = new THREE.MeshBasicMaterial();
+  const ground = new THREE.Mesh(flatGeo(new THREE.PlaneGeometry(sizeX + 1200, sizeY + 1200), 0), groundMat);
+  ground.position.set(cx, 0, -cy);
   root.add(ground);
 
-  const laneMat = basic(palette.lane);
-  const aisles = [];
-  for (let r = 0; r + 1 < lot.rows; r += 2) {
-    const z = rowZ(r) + D + AISLE / 2;
-    aisles.push(z);
-    const lane = flat(new THREE.Mesh(new THREE.PlaneGeometry(totalW + 16, 0.45), laneMat));
-    lane.position.set(totalW / 2, 0.01, z);
-    root.add(lane);
-  }
-  if (aisles.length) {                                 // the driver's own car, waiting in the first aisle
-    const you = makeCar(driverMat, driverWheel);
-    you.position.set(-3.5, 0, aisles[0] + 1.6);
-    root.add(you);
+  const lotMat = new THREE.MeshBasicMaterial();
+  const lotShape = shapeOf(plan.outline[0]);
+  plan.outline.slice(1).forEach((hole) => lotShape.holes.push(new THREE.Path(hole.map(([x, y]) => new THREE.Vector2(x, y)))));
+  root.add(new THREE.Mesh(flatGeo(new THREE.ShapeGeometry(lotShape), 0.01), lotMat));
+  const edgeMat = new THREE.LineBasicMaterial();
+  const edgePts = plan.outline[0].map(([x, y]) => new THREE.Vector3(x, 0.02, -y));
+  root.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(edgePts), edgeMat));
+
+  const islandMat = new THREE.MeshBasicMaterial();
+  for (const ring of plan.islands) root.add(new THREE.Mesh(flatGeo(new THREE.ShapeGeometry(shapeOf(ring)), 0.025), islandMat));
+
+  // Buildings: extruded footprints with a rounded bevel, so they read soft rather than boxy.
+  const buildingMat = new THREE.MeshLambertMaterial();
+  for (const ring of plan.buildings) {
+    const geo = new THREE.ExtrudeGeometry(shapeOf(ring), { depth: 8, bevelEnabled: true, bevelSize: 0.9, bevelThickness: 0.9, bevelSegments: 3, curveSegments: 6 });
+    geo.rotateX(-Math.PI / 2);
+    root.add(new THREE.Mesh(geo, buildingMat));
   }
 
-  const edgeGeo = roundRect(W - 0.22, D - 0.22, 0.35);
-  const fillGeo = roundRect(W - 0.5, D - 0.5, 0.25);
-  const tagGeo = new THREE.CircleGeometry(0.42, 24);
-  const pads = [];
-  const bays = new Map();
+  // ---------- spots and cars, instanced ----------
+  const padGeo = flatGeo(roundRect(W - 0.3, D - 0.3, 0.35), 0.04);
+  const padMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const pads = new THREE.InstancedMesh(padGeo, padMat, N);
+  const carGeo = carGeometry();
+  const carMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const cars = new THREE.InstancedMesh(carGeo, carMat, N);
+  const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.22, 14);
+  wheelGeo.rotateX(Math.PI / 2);
+  const wheelMat = new THREE.MeshLambertMaterial();
+  const wheels = new THREE.InstancedMesh(wheelGeo, wheelMat, N * 4);
+  const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, depthWrite: false });
+  const shadows = new THREE.InstancedMesh(flatGeo(roundRect(5.0, 2.5, 0.9), 0.05), shadowMat, N);
+  root.add(pads, shadows, cars, wheels);
 
-  for (const s of spots) {
-    const x = s.col * W + W / 2, z = rowZ(s.row) + D / 2;
-    const facing = s.row % 2 === 0 ? 1 : -1;          // +1: the aisle is on the +z side
-    const edge = flat(new THREE.Mesh(edgeGeo, basic(0xffffff)));
-    edge.position.set(x, 0.02, z);
-    edge.userData.id = s.id;
-    const fill = flat(new THREE.Mesh(fillGeo, basic(0xffffff)));
-    fill.position.set(x, 0.03, z);
-    root.add(edge, fill);
-    pads.push(edge);
-    if (s.type !== 'standard') {
-      const tag = flat(new THREE.Mesh(tagGeo, basic(s.type === 'ev' ? 0x8b5cf6 : 0x60a5fa)));
-      tag.position.set(x, 0.04, z + facing * (D / 2 + 0.75));
-      root.add(tag);
-    }
-    const car = makeCar(ghostMat, ghostWheel);
-    car.rotation.y = (-facing * Math.PI) / 2;          // nose towards the aisle
-    car.position.set(x, 0, z);
-    root.add(car);
-    bays.set(s.id, { edge, fill, car, spot: s });
-  }
+  const dummy = new THREE.Object3D();
+  const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+  const carMatrix = [], wheelLocal = [[-1.35, 0.34, 0.95], [-1.35, 0.34, -0.95], [1.35, 0.34, 0.95], [1.35, 0.34, -0.95]]
+    .map(([x, y, z]) => new THREE.Matrix4().makeTranslation(x, y, z));
+  const index = new Map();
+  plan.spots.forEach((s, i) => {
+    index.set(s.id, i);
+    dummy.position.set(s.x, 0, -s.y);
+    dummy.rotation.set(0, s.heading, 0);
+    dummy.updateMatrix();
+    pads.setMatrixAt(i, dummy.matrix);
+    // The car points across its row, nose to the aisle.
+    dummy.rotation.set(0, s.heading + Math.PI / 2, 0);
+    dummy.updateMatrix();
+    carMatrix.push(dummy.matrix.clone());
+  });
+
+  // Your spots get a soft green glow underneath.
+  const glowMat = new THREE.MeshBasicMaterial({ color: 0x30c26e, transparent: true, opacity: 0.5, depthWrite: false });
+  const glowGeo = flatGeo(roundRect(W + 1.4, D + 1.4, 1.1), 0.035);
+  const glows = [];
 
   const marker = new THREE.Sprite(new THREE.SpriteMaterial({ map: badgeTexture(), depthTest: false }));
   marker.scale.set(2.4, 2.4, 1);
@@ -172,37 +165,54 @@ export function createLot3D(el, lot, spots, { dark = false, onPick = () => {} } 
   root.add(marker);
 
   let selectedId = null;
+  let current = new Map(spots.map((s) => [s.id, s]));
+  const color = new THREE.Color();
 
   function paint() {
     scene.background = new THREE.Color(palette.background);
     scene.fog.color.setHex(palette.background);
-    groundMat.color.setHex(palette.ground);
-    laneMat.color.setHex(palette.lane);
-    ghostMat.color.setHex(palette.ghost);
-    ghostWheel.color.setHex(palette.ghostWheel);
-    driverMat.color.setHex(palette.driver);
-    driverWheel.color.setHex(palette.driverWheel);
+    groundMat.color.setHex(palette.background);
+    lotMat.color.setHex(palette.ground);
+    edgeMat.color.setHex(palette.available[0]);
+    islandMat.color.setHex(palette.island);
+    buildingMat.color.setHex(palette.building);
+    wheelMat.color.setHex(palette.ghostWheel);
     shadowMat.opacity = palette.shadow;
     hemi.groundColor.setHex(dark ? 0x202226 : 0xb4b9c1);
     hemi.intensity = dark ? 1.6 : 2.9;
   }
 
-  function sync(nextSpots, nextSelected) {
+  function sync(list, nextSelected) {
     selectedId = nextSelected;
+    current = new Map(list.map((s) => [s.id, s]));
     marker.visible = false;
-    for (const s of nextSpots) {
-      const bay = bays.get(s.id);
-      if (!bay) continue;
-      bay.spot = s;
-      const [edgeColor, fillColor] =
-        s.id === selectedId ? palette.selected : s.mine ? palette.mine : palette[s.status] || palette.available;
-      bay.edge.material.color.setHex(edgeColor);
-      bay.fill.material.color.setHex(fillColor);
-      bay.car.visible = Boolean(s.occupied);
-      if (s.id === selectedId) {
-        marker.visible = true;
-        marker.position.set(bay.edge.position.x, 3.4, bay.edge.position.z);
+    let glowCount = 0;
+    plan.spots.forEach((p, i) => {
+      const s = current.get(p.id);
+      const state = !s ? 'occupied' : s.id === selectedId && !s.mine ? 'selected' : s.mine ? 'mine' : s.status;
+      pads.setColorAt(i, color.setHex((palette[state] || palette.available)[0]));
+      const parked = Boolean(s?.occupied);
+      cars.setMatrixAt(i, parked ? carMatrix[i] : hidden);
+      cars.setColorAt(i, color.setHex(s?.mine ? palette.mine[0] : palette.ghost));
+      shadows.setMatrixAt(i, parked ? carMatrix[i] : hidden);
+      wheelLocal.forEach((w, k) => wheels.setMatrixAt(i * 4 + k, parked ? new THREE.Matrix4().multiplyMatrices(carMatrix[i], w) : hidden));
+      if (s?.mine) {
+        let glow = glows[glowCount];
+        if (!glow) { glow = new THREE.Mesh(glowGeo, glowMat); root.add(glow); glows.push(glow); }
+        glow.position.set(p.x, 0, -p.y);
+        glow.rotation.set(0, p.heading, 0);
+        glow.visible = true;
+        glowCount += 1;
       }
+      if (s && s.id === selectedId) {
+        marker.visible = true;
+        marker.position.set(p.x, 3.4, -p.y);
+      }
+    });
+    glows.slice(glowCount).forEach((g) => { g.visible = false; });
+    for (const mesh of [pads, cars, shadows, wheels]) {
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }
   }
 
@@ -210,20 +220,20 @@ export function createLot3D(el, lot, spots, { dark = false, onPick = () => {} } 
     dark = isDarkNow;
     palette = dark ? PALETTES.dark : PALETTES.light;
     paint();
-    sync([...bays.values()].map((b) => b.spot), selectedId);
+    sync([...current.values()], selectedId);
   }
 
   // ---------- camera and gestures ----------
-  const base = Math.max(totalW + 8, totalD * 1.5) * 0.85 + 12;
-  let theta = -0.6, phi = 0.92, radius = base, zoomed = false;
+  const base = Math.max(sizeX, sizeY * 1.4) * 0.75 + 20;
+  let theta = 0, phi = 0.85, radius = base, zoomed = false;
   const minR = 14, maxR = base * 2.6;
   const clampR = (v) => Math.min(maxR, Math.max(minR, v));
 
   function place() {
     camera.position.set(radius * Math.sin(phi) * Math.sin(theta), radius * Math.cos(phi), radius * Math.sin(phi) * Math.cos(theta));
     camera.lookAt(0, 0, 0);
-    scene.fog.near = radius * 1.1;
-    scene.fog.far = radius * 3.2 + 60;
+    scene.fog.near = radius * 1.2;
+    scene.fog.far = radius * 3.5 + 80;
   }
 
   const canvas = renderer.domElement;
@@ -237,8 +247,8 @@ export function createLot3D(el, lot, spots, { dark = false, onPick = () => {} } 
     const box = canvas.getBoundingClientRect();
     pointer.set(((e.clientX - box.left) / box.width) * 2 - 1, -((e.clientY - box.top) / box.height) * 2 + 1);
     ray.setFromCamera(pointer, camera);
-    const found = ray.intersectObjects(pads)[0];
-    return found ? found.object.userData.id : null;
+    const found = ray.intersectObject(pads)[0];
+    return found && found.instanceId != null ? plan.spots[found.instanceId].id : null;
   }
 
   canvas.addEventListener('pointerdown', (e) => {
@@ -267,10 +277,10 @@ export function createLot3D(el, lot, spots, { dark = false, onPick = () => {} } 
     }
     if (e.pointerType !== 'mouse') return;
     const id = hit(e);
-    if (id) {
-      const s = bays.get(id).spot, box = el.getBoundingClientRect();
-      const label = s.mine ? 'yours' : s.status;
-      tip.textContent = `${id} · ${label}${s.type !== 'standard' ? ' · ' + TYPE_LABEL[s.type] : ''}`;
+    const s = id && current.get(id);
+    if (s) {
+      const box = el.getBoundingClientRect();
+      tip.textContent = `${id} · ${s.mine ? 'yours' : s.status}${s.type !== 'standard' ? ' · ' + TYPE_LABEL[s.type] : ''}`;
       tip.style.left = `${e.clientX - box.left}px`;
       tip.style.top = `${e.clientY - box.top}px`;
       tip.style.display = 'block';
@@ -321,6 +331,7 @@ export function createLot3D(el, lot, spots, { dark = false, onPick = () => {} } 
   const loop = (t) => {
     frame = requestAnimationFrame(loop);
     if (marker.visible) marker.position.y = 3.4 + Math.sin(t / 320) * 0.2;
+    glowMat.opacity = 0.35 + Math.sin(t / 420) * 0.18;
     renderer.render(scene, camera);
   };
   frame = requestAnimationFrame(loop);

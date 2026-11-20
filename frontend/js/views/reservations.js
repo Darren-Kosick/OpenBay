@@ -23,7 +23,8 @@ export default {
         <strong>${esc(r.lot_name)} · Spot ${esc(r.spot)}</strong>
         ${plateBadge(r.plate)}
       </div>
-      <p class="muted small num">${esc(timeRange(r.start, r.end))} · ${money(r.total)} · ${status(r)}</p>
+      <p class="muted small num">${esc(timeRange(r.start, r.end))} · ${status(r)}</p>
+      <p class="small num">${r.total ? `Paid ${money(r.total)}${r.card ? ` · ${esc(r.card)}` : ''}` : 'Included with your permit'}${r.refunded > 0 ? ` · <span class="refund">${money(r.refunded)} refunded</span>` : ''}</p>
       ${r.moved_from ? `<p class="moved">Moved from ${esc(r.moved_from)} after a violation report</p>` : ''}
       ${r.active ? `<div class="row">
           <button class="btn" data-act="report" data-id="${esc(r.id)}">Someone is in my spot</button>
@@ -76,6 +77,13 @@ export default {
       ctx.openModal(`<div class="stack">
         <h2>Cancel this reservation?</h2>
         <p class="muted">${esc(r.lot_name)} · Spot ${esc(r.spot)} will be released for other drivers.</p>
+        ${r.total ? `<dl class="kv card" style="padding:14px">
+          <dt>Paid</dt><dd class="num">${money(r.total)}</dd>
+          <dt>Refund</dt><dd class="num"><strong>${money(r.refundable)}</strong>${r.card && r.refundable > 0 ? ` to ${esc(r.card)}` : ''}</dd>
+        </dl>
+        <p class="muted small">${r.refundable >= r.total
+          ? 'You booked in the last 5 minutes, so you get everything back.'
+          : r.refundable > 0 ? 'Refunds cover the whole hours you have not used yet.' : 'Less than an hour is left, so there is nothing to refund.'}</p>` : ''}
         <div class="grid2">
           <button class="btn" data-act="close-modal">Keep it</button>
           <button class="btn primary" data-act="cancel" data-id="${esc(r.id)}">Cancel reservation</button>
@@ -84,9 +92,9 @@ export default {
     },
 
     async cancel(ctx, el) {
-      await ctx.api.cancel(el.dataset.id);
+      const r = await ctx.api.cancel(el.dataset.id);
       await ctx.go('reservations');
-      ctx.toast('Reservation cancelled.');
+      ctx.toast(r.refunded > 0 ? `Reservation cancelled. ${money(r.refunded)} refunded.` : 'Reservation cancelled.');
     },
 
     done: (ctx) => ctx.go('reservations'),
@@ -122,7 +130,7 @@ function outcome({ outcome: kind, reservation: r }) {
   }
   return `<div class="stack">
     <div class="hero"><div class="icon warn" aria-hidden="true">!</div><h2>No free spots right now</h2></div>
-    <p class="muted" style="text-align:center">Every lot is full, so your reservation was cancelled and refunded. The report has been sent to the lot operator.</p>
+    <p class="muted" style="text-align:center">Every lot is full, so your reservation was cancelled and ${money(r.refunded)} was refunded${r.card ? ` to ${esc(r.card)}` : ''}. The report has been sent to the lot operator.</p>
     <button class="btn primary block" data-act="done">Done</button>
   </div>`;
 }

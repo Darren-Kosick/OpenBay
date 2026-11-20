@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import locks
 from .config import settings
 from .db import utcnow
+from .layout import layout
 from .models import Lot, Reservation, Spot
 
 
@@ -82,8 +83,11 @@ def public(state: dict, user_id: int | None) -> dict:
 
 
 async def lot_states(session: AsyncSession, redis: Redis, lot_id: str) -> list[dict]:
+    """Every spot in the lot's current layout. Older spots kept only for booking history are left out."""
+    plan = layout(lot_id)
+    current = {spot.code for spot in plan.spots} if plan else None
     spots = (await session.scalars(select(Spot).where(Spot.lot_id == lot_id).order_by(Spot.row, Spot.col))).all()
-    return await raw_states(session, redis, list(spots))
+    return await raw_states(session, redis, [spot for spot in spots if current is None or spot.code in current])
 
 
 async def publish(session: AsyncSession, redis: Redis, spot_ids: list[int]) -> None:

@@ -25,7 +25,7 @@ async def register(body: RegisterIn, session: AsyncSession = Depends(get_session
         await session.commit()
     except IntegrityError:                       # same email registered on another replica a moment ago
         raise HTTPException(409, "An account with that email already exists.")
-    await session.refresh(user, ["vehicles", "card"])
+    await session.refresh(user, ["vehicles", "card", "permit"])
     return AuthOut(token=create_token(user.id), user=UserOut.model_validate(user))
 
 

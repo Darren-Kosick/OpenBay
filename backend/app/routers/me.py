@@ -2,15 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
-from ..models import PaymentCard, User, Vehicle
-from ..schemas import CardIn, UserOut, UserPatch, VehicleIn
+from ..models import ParkingPermit, PaymentCard, User, Vehicle
+from ..schemas import CardIn, PermitIn, UserOut, UserPatch, VehicleIn
 from ..security import current_user
 
 router = APIRouter(prefix="/api/me", tags=["account"])
 
 
 async def _fresh(session: AsyncSession, user: User) -> UserOut:
-    await session.refresh(user, ["vehicles", "card"])
+    await session.refresh(user, ["vehicles", "card", "permit"])
     return UserOut.model_validate(user)
 
 
@@ -63,5 +63,23 @@ async def save_card(body: CardIn, user: User = Depends(current_user), session: A
 async def remove_card(user: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
     if user.card:
         await session.delete(user.card)
+        await session.commit()
+    return await _fresh(session, user)
+
+
+@router.put("/permit", response_model=UserOut)
+async def save_permit(body: PermitIn, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
+    if user.permit:
+        user.permit.kind, user.permit.number = body.kind, body.number
+    else:
+        session.add(ParkingPermit(user_id=user.id, kind=body.kind, number=body.number))
+    await session.commit()
+    return await _fresh(session, user)
+
+
+@router.delete("/permit", response_model=UserOut)
+async def remove_permit(user: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
+    if user.permit:
+        await session.delete(user.permit)
         await session.commit()
     return await _fresh(session, user)

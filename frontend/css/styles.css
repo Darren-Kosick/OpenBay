@@ -341,3 +341,55 @@ details.add > summary::-webkit-details-marker { display: none; }
   text-align: center; color: #fff; background: #15181c; border-radius: 99px; box-shadow: var(--shadow);
 }
 :root[data-theme="dark"] .toast { background: #eceef1; color: #15181c; }
+.refund { color: var(--ok); }
+
+/* ---------- 3D campus map ---------- */
+.campus { position: relative; height: 380px; border-radius: 12px; overflow: hidden; background: var(--panel-2); border: 1px solid var(--line); }
+@media (max-width: 420px) { .campus { height: 320px; } }
+.campus .loading, .stage .loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
+.lot-pin {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 4px 3px 8px;
+  border: 0; border-radius: 999px; cursor: pointer;
+  background: var(--spot-available); color: #fff; font: 700 11px/1.2 system-ui, -apple-system, sans-serif;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+.lot-pin span { min-width: 18px; padding: 1px 5px; border-radius: 999px; background: rgba(255, 255, 255, 0.92); color: var(--spot-available); text-align: center; }
+.lot-pin.full { background: var(--spot-reserved); }
+.lot-pin.full span { color: var(--spot-reserved); }
+.lot-pin:focus-visible { outline: 3px solid var(--text); outline-offset: 2px; }
+.me-dot { width: 16px; height: 16px; border-radius: 50%; background: #2f80ff; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(47, 128, 255, 0.25), 0 1px 4px rgba(0, 0, 0, 0.4); }
+.maplibregl-ctrl-attrib { font-size: 10px; }
+
+/* ---------- 2D lot plan ---------- */
+.plan2d { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; background: var(--plan-bg); user-select: none; }
+.plan2d .p-building { fill: var(--plan-building); stroke: var(--plan-building-edge); stroke-width: 0.6; stroke-linejoin: round; }
+.plan2d .p-lot { fill: var(--plan-lot); stroke: var(--spot-available); stroke-width: 0.6; stroke-linejoin: round; }
+.plan2d .p-island { fill: var(--plan-island); stroke-linejoin: round; }
+.plan2d .bay { cursor: pointer; }
+.plan2d .pad { fill: var(--spot-available); stroke: none; }
+.plan2d .glow { fill: none; stroke: none; }
+.plan2d .s-held .pad, .plan2d .s-reserved .pad { fill: var(--spot-reserved); }
+.plan2d .s-occupied .pad { fill: var(--spot-occupied); }
+.plan2d .s-mine .pad { fill: var(--spot-mine); }
+.plan2d .s-mine .glow { stroke: var(--spot-mine); stroke-width: 0.9; opacity: 0.55; }
+.plan2d .k-accessible .pad { stroke: var(--spot-accessible); stroke-width: 0.35; }
+.plan2d .k-ev .pad { stroke: var(--spot-ev); stroke-width: 0.35; }
+.plan2d .sel .pad { stroke: var(--text); stroke-width: 0.5; }
+.plan2d .code { display: none; font: 700 1.05px system-ui, -apple-system, sans-serif; fill: #fff; text-anchor: middle; pointer-events: none; }
+.plan2d.labels .code { display: block; }
+.plan2d .s-occupied .code { fill: var(--spot-occupied-ink); }
+:root { --plan-bg: #eceee9; --plan-lot: #f7f7f5; --plan-island: #cfe5c4; --plan-building: #dcd8d0; --plan-building-edge: #c9c4ba; }
+:root[data-theme="dark"] { --plan-bg: #22252f; --plan-lot: #2c3040; --plan-island: #2b4337; --plan-building: #4a4762; --plan-building-edge: #57536f; }
+.plan2d .car, .plan2d .cabin { display: none; pointer-events: none; }
+.plan2d .parked .car { display: block; fill: var(--plan-car); }
+.plan2d .parked .cabin { display: block; fill: var(--plan-cabin); }
+.plan2d .s-mine.parked .car { fill: var(--spot-mine); }
+.plan2d.labels .parked .code { display: none; }
+:root { --plan-car: #cfd2d8; --plan-cabin: #8c929c; }
+:root[data-theme="dark"] { --plan-car: #7a7f8c; --plan-cabin: #3e424d; }
+.lot-pin.permit { background: #5b6478; }
+.lot-pin.permit span { color: #4a5266; }
+.lot-pin.permit.full { background: var(--spot-reserved); }
+.badge.permit { background: color-mix(in srgb, var(--muted) 22%, transparent); color: var(--text); }
+.pay-row { flex-wrap: nowrap; align-items: flex-start; }
+.pay-row > div:first-child { min-width: 0; overflow-wrap: anywhere; }

@@ -16,6 +16,7 @@ os.environ["REDIS_URL"] = "fake://"
 os.environ["SENSOR_KEY"] = "test-sensor-key"
 os.environ["INSTANCE_NAME"] = "test-1"
 os.environ["SWEEP_SECONDS"] = "3600"
+os.environ["PAYMENT_DELAY_MS"] = "0"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi.testclient import TestClient  # noqa: E402

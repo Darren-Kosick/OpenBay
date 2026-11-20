@@ -36,13 +36,13 @@ async def main() -> None:
     async with httpx.AsyncClient(base_url=BASE, timeout=30, limits=limits) as client:
         drivers = await asyncio.gather(*(register(client, run, i) for i in range(DRIVERS)))
 
-        spots = (await client.get("/api/lots/L3/spots")).json()
+        spots = (await client.get("/api/lots/F2/spots")).json()
         target = next(s["id"] for s in spots if s["status"] == "available" and s["type"] == "standard")
-        print(f"{DRIVERS} drivers racing for spot L3/{target} through {BASE}")
+        print(f"{DRIVERS} drivers racing for spot F2/{target} through {BASE}")
 
         async def grab(driver: dict):
             headers = {"Authorization": driver["Authorization"]}
-            response = await client.post(f"/api/lots/L3/spots/{target}/hold", headers=headers)
+            response = await client.post(f"/api/lots/F2/spots/{target}/hold", headers=headers)
             return driver, response.status_code, response.headers.get("X-Served-By", "?")
 
         start = time.perf_counter()
@@ -58,14 +58,14 @@ async def main() -> None:
         losers = [d for d, status, _ in results if status != 200]
         sneaky = await asyncio.gather(*(client.post(
             "/api/reservations", headers={"Authorization": d["Authorization"]},
-            json={"lot_id": "L3", "spot": target, "plate": d["plate"], "hours": 1}) for d in losers))
+            json={"lot_id": "F2", "spot": target, "plate": d["plate"], "hours": 1}) for d in losers))
         sneaky_ok = sum(r.status_code == 201 for r in sneaky)
         print(f"  reservations by drivers without the hold: {sneaky_ok}")
 
         winner = winners[0] if winners else None
         if winner:
             made = await client.post("/api/reservations", headers={"Authorization": winner["Authorization"]},
-                                     json={"lot_id": "L3", "spot": target, "plate": winner["plate"], "hours": 1})
+                                     json={"lot_id": "F2", "spot": target, "plate": winner["plate"], "hours": 1})
             print(f"  winner's reservation: HTTP {made.status_code}")
             if made.status_code == 201:      # tidy up so the demo lot is not left with test reservations
                 await client.delete(f"/api/reservations/{made.json()['id']}",

@@ -24,6 +24,8 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan", lazy="selectin", order_by="Vehicle.id")
     card: Mapped["PaymentCard | None"] = relationship(
         back_populates="user", cascade="all, delete-orphan", lazy="selectin", uselist=False)
+    permit: Mapped["ParkingPermit | None"] = relationship(
+        back_populates="user", cascade="all, delete-orphan", lazy="selectin", uselist=False)
 
 
 class Vehicle(Base):
@@ -53,6 +55,19 @@ class PaymentCard(Base):
     holder: Mapped[str] = mapped_column(String(120))
 
     user: Mapped[User] = relationship(back_populates="card")
+
+
+class ParkingPermit(Base):
+    """A campus parking permit. 'permit' opens the permit lots; 'employee' opens those and the staff lots."""
+
+    __tablename__ = "parking_permits"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(10))          # permit | employee
+    number: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    user: Mapped[User] = relationship(back_populates="permit")
 
 
 class Lot(Base):
@@ -102,6 +117,26 @@ class Reservation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     spot: Mapped[Spot] = relationship(lazy="joined")
+
+
+class Payment(Base):
+    """One charge or refund. A reservation's charge and any refunds against it share reservation_id."""
+
+    __tablename__ = "payments"
+
+    id: Mapped[str] = mapped_column(String(16), primary_key=True)          # the processor's reference
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    reservation_id: Mapped[str | None] = mapped_column(ForeignKey("reservations.id"), nullable=True, index=True)
+    kind: Mapped[str] = mapped_column(String(8))                           # charge | refund
+    status: Mapped[str] = mapped_column(String(10))                        # succeeded | declined
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    card: Mapped[str] = mapped_column(String(40))                          # "Visa ···· 4242"
+    description: Mapped[str] = mapped_column(String(120))
+    message: Mapped[str] = mapped_column(String(200), default="")
+    # Sent by the app with each attempt to pay. A retry with the same key (a double tap, or a request
+    # that a load balancer resends to another replica) gets the first result instead of a second charge.
+    idempotency_key: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class ViolationReport(Base):

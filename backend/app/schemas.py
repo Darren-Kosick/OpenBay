@@ -108,6 +108,34 @@ class CardOut(BaseModel):
     holder: str
 
 
+class PermitIn(BaseModel):
+    """Demo: any permit number is accepted. A real build would check it against Parking Services."""
+
+    kind: str
+    number: str
+
+    @field_validator("kind")
+    @classmethod
+    def check_kind(cls, value: str) -> str:
+        if value not in {"permit", "employee"}:
+            raise ValueError("Choose a permit type.")
+        return value
+
+    @field_validator("number")
+    @classmethod
+    def check_number(cls, value: str) -> str:
+        number = re.sub(r"[^A-Z0-9]", "", (value or "").upper())
+        if not 4 <= len(number) <= 16:
+            raise ValueError("Enter the permit number printed on your permit (4 to 16 letters and numbers).")
+        return number
+
+
+class PermitOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    kind: str
+    number: str
+
+
 class RegisterIn(BaseModel):
     name: str
     email: str
@@ -160,6 +188,7 @@ class UserOut(BaseModel):
     phone: str
     vehicles: list[VehicleOut]
     card: CardOut | None
+    permit: PermitOut | None = None
 
 
 class AuthOut(BaseModel):
@@ -187,6 +216,7 @@ class LotOut(BaseModel):
     rows: int
     cols: int
     hourly_rate: float
+    access: str = "daily"           # daily | permit | employees
     total: int
     free: int
 
@@ -196,6 +226,8 @@ class ReserveIn(BaseModel):
     spot: str
     plate: str
     hours: int = Field(ge=1, le=8)
+    # A fresh random value for each "Confirm and pay" tap; resending it never charges twice.
+    payment_key: str | None = Field(default=None, min_length=8, max_length=64)
 
     @field_validator("plate")
     @classmethod
@@ -215,6 +247,21 @@ class ReservationOut(BaseModel):
     status: str
     active: bool
     moved_from: str | None
+    card: str | None = None             # what it was charged to, e.g. "Visa ···· 4242"
+    refunded: float = 0
+    refundable: float = 0               # what cancelling right now would give back
+
+
+class PaymentOut(BaseModel):
+    id: str
+    kind: str                           # charge | refund
+    status: str                         # succeeded | declined
+    amount: float
+    card: str
+    description: str
+    message: str
+    reservation_id: str | None
+    created_at: datetime
 
 
 class ViolationIn(BaseModel):

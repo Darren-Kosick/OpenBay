@@ -1,14 +1,21 @@
 // One lot: the 3D (or 2D) map, live spot updates, holding a spot and confirming a reservation.
 
-import { $, clock, esc, isDark, money, onThemeChange, timeRange } from '../util.js';
-import { errorBox, plateBadge } from './ui.js';
+import { $, clock, esc, isDark, lotBadge, mayUse, money, onThemeChange, priceLabel, timeRange } from '../util.js';
+import { lotPlan } from '../lotplan.js';
+import { createPlan2D } from '../plan2d.js';
+import { parseCard } from '../validate.js';
+import { cardFields, errorBox, plateBadge } from './ui.js';
 
 const TYPE_LABEL = { standard: 'Standard', accessible: 'Accessible', ev: 'EV charging' };
 const HOURS = [1, 2, 3, 4, 6, 8];
 
 let scene = null;            // the 3D view, while it is on screen
-let stageKind = null;        // '3d-loading' | '3d' | '2d'
+let stageKind = null;        // 'map-loading' | 'map' | '3d-loading' | '3d' | '2d'
 let stageToken = 0;          // ignores a 3D view that finishes loading after the screen changed
+
+// One random key per attempt to pay. Resending the same attempt (after a dropped connection) reuses it,
+// so the server answers with the first result instead of charging again.
+const newKey = () => (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
 const withDeadline = (s) => ({ ...s, deadline: s.held_ms != null ? Date.now() + s.held_ms : null });
 const myHold = (state) => state.spots.find((s) => s.status === 'held' && s.mine);
@@ -29,7 +36,7 @@ export default {
     if (!state.lot) throw new Error('That lot no longer exists.');
     state.spots = (await api.spots(state.lot.id)).map(withDeadline);
     Object.assign(state, { sel: null, notice: '', live: { on: false, via: '' } });
-    state.mode ??= '3d';
+    state.mode ??= 'map';
     state.hours ??= 2;
   },
 
@@ -42,11 +49,12 @@ export default {
       <div>
         <button class="btn link" data-act="nav" data-view="find">← All lots</button>
         <h1 style="margin-top:8px">${esc(state.lot.name)}</h1>
-        <p class="muted small num"><span id="counts"></span> · ${money(state.lot.hourly_rate)}/h</p>
+        <p class="muted small num"><span id="counts"></span> · ${esc(priceLabel(state.lot))}${lotBadge(state.lot) ? ` <span class="badge permit">${lotBadge(state.lot)}</span>` : ''}</p>
       </div>
       <div class="row between">
         <span id="live" class="live">Connecting…</span>
         <div class="seg" role="group" aria-label="Map view">
+          <button data-act="mode" data-mode="map" aria-pressed="${state.mode === 'map'}">Map</button>
           <button data-act="mode" data-mode="3d" aria-pressed="${state.mode === '3d'}">3D</button>
           <button data-act="mode" data-mode="2d" aria-pressed="${state.mode === '2d'}">2D</button>
         </div>
@@ -134,30 +142,61 @@ export default {
 
     hours(ctx, el) {
       ctx.state.hours = Number(el.value);
+      if (!ctx.state.lot.hourly_rate) return;              // permit lots: nothing to pay
+      const amount = money(ctx.state.lot.hourly_rate * ctx.state.hours);
       const total = $('#total');
-      if (total) total.textContent = money(ctx.state.lot.hourly_rate * ctx.state.hours);
+      if (total) total.textContent = amount;
+      const pay = $('#pay');
+      if (pay && !pay.disabled) pay.textContent = `Pay ${amount} and reserve`;
     },
 
     plate(ctx, el) {
       ctx.state.plate = el.value;
     },
+
+    'swap-card'(ctx) {
+      ctx.openModal(`<form data-form="card" class="stack" novalidate>
+        <h2>Use another card</h2>
+        <p class="muted small">Your spot stays held while you do this. The card replaces the one in your profile.</p>
+        ${cardFields()}
+        <div class="grid2">
+          <button type="button" class="btn" data-act="close-modal">Cancel</button>
+          <button type="submit" class="btn primary">Save card</button>
+        </div>
+      </form>`);
+    },
   },
 
   forms: {
-    async reserve(ctx, data) {
+    async reserve(ctx, data, form) {
       const { state, api } = ctx;
+      state.payKey ??= newKey();
+      const pay = form.querySelector('#pay');
+      if (pay) pay.textContent = state.lot.hourly_rate ? 'Processing payment…' : 'Reserving…';
       try {
-        const reservation = await api.reserve({ lot_id: state.lot.id, spot: state.sel, plate: data.plate, hours: Number(data.hours) });
+        const reservation = await api.reserve({
+          lot_id: state.lot.id, spot: state.sel, plate: data.plate, hours: Number(data.hours), payment_key: state.payKey,
+        });
         const spot = state.spots.find((s) => s.id === state.sel);
         if (spot) Object.assign(spot, { status: 'reserved', mine: true, deadline: null, held_ms: null });
-        state.err = '';
+        Object.assign(state, { err: '', declined: false, payKey: null });
         refresh(ctx);
         ctx.openModal(confirmation(reservation));
       } catch (error) {
+        if (error.status !== 0) state.payKey = null;     // the server answered, so the next tap is a new attempt
         state.err = error.message;
+        state.declined = error.status === 402;
         if (error.status === 409) state.spots = (await api.spots(state.lot.id)).map(withDeadline);
         refresh(ctx);
       }
+    },
+
+    async card(ctx, data) {
+      ctx.state.user = await ctx.api.saveCard(parseCard(data));
+      Object.assign(ctx.state, { err: '', declined: false });
+      ctx.closeModal();
+      refresh(ctx);
+      ctx.toast('Card saved. Try paying again.');
     },
   },
 };
@@ -177,13 +216,35 @@ function mountStage(ctx) {
   const stage = $('#stage');
   const token = stageToken;
 
-  if (state.mode === '3d') {
+  if (state.mode === 'map') {
+    stageKind = 'map-loading';
+    stage.innerHTML = '<div class="loading">Loading campus map…</div>';
+    import('../campusmap.js')
+      .then(({ createLotMap }) => createLotMap(stage, state.lot, state.spots, {
+        dark: isDark(), lots: state.lots || [],
+        onPick: (id) => pick(ctx, id),
+        onLot: (id) => ctx.go('lot', { lotId: id }),
+      }))
+      .then((map) => {
+        if (token !== stageToken) { map.dispose(); return; }
+        scene = map;
+        stageKind = 'map';
+        refresh(ctx, false);
+      })
+      .catch(() => {
+        if (token !== stageToken) return;
+        state.mode = '3d';
+        state.notice = 'The campus map could not load, so the lot is shown in 3D.';
+        document.querySelectorAll('[data-act="mode"]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === '3d')));
+        mountStage(ctx);
+      });
+  } else if (state.mode === '3d') {
     stageKind = '3d-loading';
     stage.innerHTML = '<div class="loading">Loading 3D view…</div>';
-    import('../lot3d.js')
-      .then(({ createLot3D }) => {
+    Promise.all([import('../lot3d.js'), lotPlan(state.lot.id)])
+      .then(([{ createLot3D }, plan]) => {
         if (token !== stageToken) return;
-        scene = createLot3D(stage, state.lot, state.spots, { dark: isDark(), onPick: (id) => pick(ctx, id) });
+        scene = createLot3D(stage, plan, state.spots, { dark: isDark(), onPick: (id) => pick(ctx, id) });
         stageKind = '3d';
         refresh(ctx, false);
       })
@@ -195,7 +256,20 @@ function mountStage(ctx) {
         mountStage(ctx);
       });
   } else {
-    stageKind = '2d';
+    stageKind = '2d-loading';
+    stage.innerHTML = '<div class="loading">Loading plan…</div>';
+    lotPlan(state.lot.id)
+      .then((plan) => {
+        if (token !== stageToken) return;
+        scene = createPlan2D(stage, plan, state.spots, { onPick: (id) => pick(ctx, id) });
+        stageKind = '2d';
+        refresh(ctx, false);
+      })
+      .catch(() => {
+        if (token !== stageToken) return;
+        stageKind = 'grid';                       // last resort: a simple grid of buttons
+        refresh(ctx);
+      });
   }
   refresh(ctx);
 }
@@ -205,11 +279,12 @@ function grid(state) {
   let html = '<div class="flat">';
   for (let r = 0; r < lot.rows; r++) {
     if (r % 2 === 1) html += '<div class="aisle">AISLE</div>';
-    html += `<div class="r" style="grid-template-columns:repeat(${lot.cols},1fr)">`;
+    // Rows follow the lot's real shape, so they can be short or have gaps: place each spot in its own column.
+    html += `<div class="r" style="grid-template-columns:repeat(${lot.cols},minmax(34px,1fr))">`;
     html += spots.filter((s) => s.row === r).map((s) => {
       const label = s.mine ? 'yours' : s.status;
       return `<button class="sp ${s.mine ? 'mine' : s.status} ${s.id === sel ? 'sel' : ''}" data-act="pick" data-id="${esc(s.id)}"
-        aria-label="Spot ${esc(s.id)}, ${TYPE_LABEL[s.type]}, ${label}">${esc(s.id)}</button>`;
+        style="grid-column:${s.col + 1}" aria-label="Spot ${esc(s.id)}, ${TYPE_LABEL[s.type]}, ${label}">${esc(s.id)}</button>`;
     }).join('');
     html += '</div>';
   }
@@ -224,15 +299,17 @@ function refresh(ctx, rebuildPanel = true) {
 
   const free = state.spots.filter((s) => s.status === 'available').length;
   $('#counts').textContent = `${free} of ${state.spots.length} spots free`;
-  $('#hint').textContent = state.mode === '3d'
-    ? 'Drag to rotate, pinch or scroll to zoom, tap a spot to select it.'
-    : 'Tap a spot to select it.';
+  $('#hint').textContent = state.mode === 'map'
+    ? 'Every spot in the lot, in place on campus. Drag to pan, right-drag or two fingers to tilt and turn, tap a spot to select it.'
+    : state.mode === '3d'
+      ? 'Drag to rotate, pinch or scroll to zoom, tap a spot to select it.'
+      : 'Drag to pan, pinch or scroll to zoom, tap a spot to select it.';
   const notice = $('#notice');
   notice.hidden = !state.notice;
   notice.textContent = state.notice || '';
 
-  if (stageKind === '3d') scene.sync(state.spots, state.sel);
-  else if (stageKind === '2d') $('#stage').innerHTML = grid(state);
+  if (stageKind === '3d' || stageKind === 'map' || stageKind === '2d') scene.sync(state.spots, state.sel);
+  else if (stageKind === 'grid') $('#stage').innerHTML = grid(state);
 
   // Don't rebuild the confirm form under the driver while they are filling it in.
   const selected = state.spots.find((s) => s.id === state.sel);
@@ -283,7 +360,7 @@ function pick(ctx, id) {
     freeUp(held);
     api.release(state.lot.id, held.id).catch(() => {});
   }
-  Object.assign(state, { sel: id, err: '', notice: '' });
+  Object.assign(state, { sel: id, err: '', notice: '', declined: false });
   refresh(ctx);
 }
 
@@ -298,9 +375,18 @@ function panel(ctx) {
   }
   const head = `<div class="row between"><h2>Spot ${esc(s.id)}</h2><span class="muted small">${TYPE_LABEL[s.type]}</span></div>`;
 
+  if (s.status === 'available' && !mayUse(state.user, state.lot)) {
+    return `<div class="stack">${head}
+      <dl class="kv"><dt>Status</dt><dd>Available</dd><dt>Who can park</dt><dd>${state.lot.access === 'employees' ? 'Employee permit holders' : 'Parking permit holders'}</dd></dl>
+      <p class="note">${state.lot.access === 'employees'
+        ? 'This is a staff lot. Add your employee permit in your profile to book here for free.'
+        : 'This lot is for campus parking permit holders. Add your permit in your profile to book here for free.'}</p>
+      <button class="btn primary block" data-act="nav" data-view="profile">Add a permit</button></div>`;
+  }
+
   if (s.status === 'available') {
     return `<div class="stack">${head}
-      <dl class="kv"><dt>Rate</dt><dd class="num">${money(state.lot.hourly_rate)}/h</dd><dt>Status</dt><dd>Available</dd></dl>
+      <dl class="kv"><dt>Rate</dt><dd class="num">${esc(priceLabel(state.lot))}</dd><dt>Status</dt><dd>Available</dd></dl>
       ${s.type === 'accessible' ? '<p class="note">Accessible permit required.</p>' : ''}
       ${s.type === 'ev' ? '<p class="note">For vehicles that are charging.</p>' : ''}
       ${errorBox(state.err)}
@@ -310,13 +396,14 @@ function panel(ctx) {
   if (s.status === 'held' && s.mine) {
     const user = state.user;
     const vehicles = user.vehicles || [];
-    const ready = vehicles.length > 0 && user.card;
+    const free = !state.lot.hourly_rate;                 // permit lots: the permit covers it
+    const ready = vehicles.length > 0 && (user.card || free);
     const plate = vehicles.some((v) => v.plate === state.plate) ? state.plate : vehicles[0]?.plate;
     return `<div class="stack">${head}
       <div><div class="muted small">Held for you</div><div class="count num" id="timer">2:00</div></div>
       ${errorBox(state.err)}
       ${vehicles.length ? '' : '<p class="note">Add a vehicle in your profile to reserve.</p>'}
-      ${user.card ? '' : '<p class="note">Add a payment method in your profile to reserve.</p>'}
+      ${user.card || free ? '' : '<p class="note">Add a payment method in your profile to reserve.</p>'}
       <form data-form="reserve" class="stack">
         <label class="field"><span>Vehicle</span>
           <select name="plate" data-change="plate" ${vehicles.length ? '' : 'disabled'}>
@@ -327,11 +414,15 @@ function panel(ctx) {
             ${HOURS.map((h) => `<option value="${h}" ${h === state.hours ? 'selected' : ''}>${h} hour${h > 1 ? 's' : ''}</option>`).join('')}
           </select></label>
         <dl class="kv">
-          <dt>Total</dt><dd class="num"><strong id="total">${money(state.lot.hourly_rate * state.hours)}</strong></dd>
-          ${user.card ? `<dt>Pay with</dt><dd>${esc(user.card.brand)} ···· ${esc(user.card.last4)}</dd>` : ''}
+          ${free
+            ? `<dt>Total</dt><dd><strong>Included with your permit</strong></dd>`
+            : `<dt>Total</dt><dd class="num"><strong id="total">${money(state.lot.hourly_rate * state.hours)}</strong></dd>
+               ${user.card ? `<dt>Pay with</dt><dd>${esc(user.card.brand)} ···· ${esc(user.card.last4)}</dd>` : ''}`}
         </dl>
-        <button class="btn primary block" type="submit" ${ready ? '' : 'disabled'}>Confirm reservation</button>
+        <button class="btn primary block" id="pay" type="submit" ${ready ? '' : 'disabled'}>${free ? 'Reserve' : `Pay ${money(state.lot.hourly_rate * state.hours)} and reserve`}</button>
+        ${user.card && !free ? '<p class="muted small" style="text-align:center">Free cancellation for 5 minutes, then unused hours are refunded.</p>' : ''}
       </form>
+      ${state.declined ? '<button class="btn block" data-act="swap-card">Use another card</button>' : ''}
       ${ready ? '' : '<button class="btn block" data-act="nav" data-view="profile">Go to profile</button>'}
       <button class="btn ghost block" data-act="release">Release spot</button></div>`;
   }
@@ -356,7 +447,7 @@ function confirmation(r) {
     <dl class="kv card" style="padding:14px">
       <dt>When</dt><dd>${esc(timeRange(r.start, r.end))}</dd>
       <dt>Leave by</dt><dd>${esc(clock(r.end))}</dd>
-      <dt>Total charged</dt><dd class="num">${money(r.total)}</dd>
+      <dt>Charged</dt><dd class="num">${r.total ? `${money(r.total)}${r.card ? ` to ${esc(r.card)}` : ''}` : 'Nothing: included with your permit'}</dd>
       <dt>Reference</dt><dd>${esc(r.id)}</dd>
     </dl>
     <p class="muted small">Park only in your reserved spot. If another vehicle is in it, report it from the Reservations tab and you'll be moved to a free spot.</p>

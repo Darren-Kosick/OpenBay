@@ -19,7 +19,7 @@ from .config import settings
 from .db import SessionLocal, engine
 from .events import hub
 from .redis_client import close_redis, get_redis
-from .routers import auth, live, lots, me, reservations, sensors
+from .routers import auth, live, lots, me, payments, reservations, sensors
 from .seed import create_schema, seed_lots
 from .spots import complete_expired, publish
 
@@ -87,7 +87,7 @@ async def health():
     return {"ok": True, "instance": settings.instance}
 
 
-for module in (auth, me, lots, reservations, sensors, live):
+for module in (auth, me, lots, reservations, payments, sensors, live):
     app.include_router(module.router)
 
 # Lets one replica serve the web app too, for running without nginx (see README).

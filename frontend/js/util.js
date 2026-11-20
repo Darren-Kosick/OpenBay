@@ -81,3 +81,22 @@ export function onThemeChange(fn) {
 
 media.addEventListener?.('change', () => { if (getAppearance() === 'system') applyTheme(); });
 applyTheme();
+
+/* ---------- permit lots ---------- */
+
+/** 'Permit' or 'Staff' for lots that need a permit, '' for daily lots. */
+export const lotBadge = (lot) => (lot?.access === 'employees' ? 'Staff' : lot?.access === 'permit' ? 'Permit' : '');
+
+/** Whether this driver's permit opens the lot (mirrors the server's rule). */
+export function mayUse(user, lot) {
+  const kind = user?.permit?.kind;
+  if (lot?.access === 'permit') return kind === 'permit' || kind === 'employee';
+  if (lot?.access === 'employees') return kind === 'employee';
+  return true;
+}
+
+/** How a lot is paid for, for the lists and headers. */
+export const priceLabel = (lot) =>
+  lot?.access === 'employees' ? 'Free with an employee permit'
+    : lot?.access === 'permit' ? 'Free with a parking permit'
+      : `${money(lot.hourly_rate)}/h`;

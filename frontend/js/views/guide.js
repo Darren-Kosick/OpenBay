@@ -10,7 +10,7 @@ const TOPICS = [
     steps: [
       'Create an account with your name, email and a password.',
       'Register your vehicle. The licence plate is how a reservation is matched to your car.',
-      'Add a payment method. You are charged when you confirm a reservation.',
+      'Add a payment method. You are charged when you confirm a reservation. Cancel within 5 minutes for a full refund; after that, unused whole hours are refunded.',
       'You can add more vehicles or change your card any time in the Profile tab.',
     ],
   },

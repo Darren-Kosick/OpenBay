@@ -23,7 +23,7 @@ export function vehicleFields(v = {}) {
 }
 
 export const CARD_NOTE =
-  'Demo payments only: nothing is charged. Use the test card 4242 4242 4242 4242 with any future expiry. Only the brand and last four digits are sent to the server.';
+  'Demo payments only: no real money moves. 4242 4242 4242 4242 is approved, 4000 0000 0000 0002 is declined, and 4000 0000 0000 9995 is declined for insufficient funds. Use any future expiry. Only the brand and last four digits are sent to the server.';
 
 export function cardFields() {
   return `<p class="note">${CARD_NOTE}</p>

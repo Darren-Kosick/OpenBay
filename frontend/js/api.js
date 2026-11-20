@@ -64,11 +64,17 @@ export const api = {
   addVehicle: (vehicle) => request('POST', '/api/me/vehicles', vehicle),
   removeVehicle: (id) => request('DELETE', `/api/me/vehicles/${id}`),
   saveCard: (card) => request('PUT', '/api/me/card', card),
+  payments: () => request('GET', '/api/payments'),
+  savePermit: (permit) => request('PUT', '/api/me/permit', permit),
+  removePermit: () => request('DELETE', '/api/me/permit'),
+  parked: () => request('GET', '/api/lots/parked'),
   removeCard: () => request('DELETE', '/api/me/card'),
 
   // Lots and spots
   lots: () => request('GET', '/api/lots'),
   spots: (lotId) => request('GET', `/api/lots/${encodeURIComponent(lotId)}/spots`),
+  campusMap: () => request('GET', '/api/lots/map'),
+  lotMap: (lotId) => request('GET', `/api/lots/${encodeURIComponent(lotId)}/map`),
   hold: (lotId, code) => request('POST', `/api/lots/${encodeURIComponent(lotId)}/spots/${encodeURIComponent(code)}/hold`),
   release: (lotId, code) => request('DELETE', `/api/lots/${encodeURIComponent(lotId)}/spots/${encodeURIComponent(code)}/hold`),
 
